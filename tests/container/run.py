@@ -1,9 +1,6 @@
 #!/usr/bin/python
 
 import socket
-import time
-
-time.sleep(3)
 
 print "binding to 1234"
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
