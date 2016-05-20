@@ -9,7 +9,7 @@ fn main() {
 
     let _docker = DockerComposition::builder()
                       .check(check_port)
-                      .build("tests/docker-compose.yml")
+                      .build(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/docker-compose.yml"))
                       .unwrap();
 }
 
