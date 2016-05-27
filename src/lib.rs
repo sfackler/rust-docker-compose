@@ -18,20 +18,19 @@ use serde_types::Container;
 #[cfg_attr(rustfmt, rustfmt_skip)]
 mod serde_types;
 
-/// A running docker composition.
+/// A running Docker composition.
 ///
 /// The composition will be shut down when this type falls out of scope.
 pub struct DockerComposition {
     compose_file: PathBuf,
     log_child: Child,
     ports: HashMap<String, HashMap<u16, u16>>,
+    down: bool,
 }
 
 impl Drop for DockerComposition {
     fn drop(&mut self) {
-        let _ = self.log_child.kill();
-        let _ = self.log_child.wait();
-        let _ = run(compose_command(&self.compose_file, &["down"]));
+        let _ = self.finish_inner();
     }
 }
 
@@ -48,6 +47,27 @@ impl DockerComposition {
     /// port, if present.
     pub fn port(&self, service: &str, port: u16) -> Option<u16> {
         self.ports.get(service).and_then(|m| m.get(&port)).cloned()
+    }
+
+    fn finish_inner(&mut self) -> Result<(), Box<Error>> {
+        if self.down {
+            return Ok(());
+        }
+
+        try!(self.log_child.kill());
+        try!(self.log_child.wait());
+        try!(run(compose_command(&self.compose_file, &["down"])));
+        self.down = true;
+
+        Ok(())
+    }
+
+    /// Shuts down the Docker composition.
+    ///
+    /// This method is equivalent `DockerComposition`'s `Drop` implementation
+    /// except that it returns any error encountered to the caller.
+    pub fn finish(mut self) -> Result<(), Box<Error>> {
+        self.finish_inner()
     }
 }
 
@@ -114,6 +134,7 @@ impl Builder {
             compose_file: compose_file,
             log_child: log_child,
             ports: ports,
+            down: false,
         };
 
         try!(self.run_checks(&composition));
