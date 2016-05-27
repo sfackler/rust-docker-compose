@@ -1,3 +1,4 @@
+//! A wrapper over Docker compositions.
 extern crate serde;
 extern crate serde_json;
 
@@ -17,6 +18,9 @@ use serde_types::Container;
 #[cfg_attr(rustfmt, rustfmt_skip)]
 mod serde_types;
 
+/// A running docker composition.
+///
+/// The composition will be shut down when this type falls out of scope.
 pub struct DockerComposition {
     compose_file: PathBuf,
     log_child: Child,
@@ -32,6 +36,7 @@ impl Drop for DockerComposition {
 }
 
 impl DockerComposition {
+    /// Creates a new `Builder` to configure a new composition.
     pub fn builder() -> Builder {
         Builder {
             checks: vec![],
@@ -39,17 +44,42 @@ impl DockerComposition {
         }
     }
 
+    /// Returns the external port mapping of the specified service's internal
+    /// port, if present.
     pub fn port(&self, service: &str, port: u16) -> Option<u16> {
         self.ports.get(service).and_then(|m| m.get(&port)).cloned()
     }
 }
 
+/// A builder to configure `DockerComposition`s.
 pub struct Builder {
     checks: Vec<Box<Fn(&DockerComposition) -> bool>>,
     timeout: Duration,
 }
 
 impl Builder {
+    /// Adds a service check which will be run when the composition is started.
+    ///
+    /// `Builder::build` will not return until all checks return `true`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use docker_compose::DockerComposition;
+    /// use std::net::TcpStream;
+    ///
+    /// // Check if the my_server service has bound its port.
+    /// fn port_bound(c: &DockerComposition) -> bool {
+    ///     let port = c.port("my_server", 8080).unwrap();
+    ///     TcpStream::connect(("localhost", port)).is_ok()
+    /// }
+    ///
+    /// let composition = DockerComposition::builder()
+    ///                       .check(port_bound)
+    ///                       .build("docker-compose.yml")
+    ///                       .unwrap();
+    /// // We know that my_server has fully booted at this point.
+    /// ```
     pub fn check<F>(&mut self, f: F) -> &mut Builder
         where F: Fn(&DockerComposition) -> bool + 'static
     {
@@ -57,11 +87,19 @@ impl Builder {
         self
     }
 
+    /// Sets the timeout for service checks.
+    ///
+    /// If all service checks have not returned `true` after this much time
+    /// has elapsed, `Builder::build` will return an error.
     pub fn timeout(&mut self, timeout: Duration) -> &mut Builder {
         self.timeout = timeout;
         self
     }
 
+    /// Boots the composition.
+    ///
+    /// This method will not return until all service checks have returned
+    /// `true`.
     pub fn build<P>(&self, compose_file: P) -> Result<DockerComposition, Box<Error>>
         where P: AsRef<Path>
     {
