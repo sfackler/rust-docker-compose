@@ -22,6 +22,7 @@ mod serde_types;
 ///
 /// The composition will be shut down when this type falls out of scope.
 pub struct DockerComposition {
+    docker_compose: PathBuf,
     compose_file: PathBuf,
     log_child: Child,
     ports: HashMap<String, HashMap<u16, u16>>,
@@ -40,6 +41,8 @@ impl DockerComposition {
         Builder {
             checks: vec![],
             timeout: Duration::from_secs(60),
+            docker: PathBuf::from("docker"),
+            docker_compose: PathBuf::from("docker-compose"),
         }
     }
 
@@ -56,7 +59,7 @@ impl DockerComposition {
 
         try!(self.log_child.kill());
         try!(self.log_child.wait());
-        try!(run(compose_command(&self.compose_file, &["down"])));
+        try!(run(compose_command(&self.docker_compose, &self.compose_file, &["down"])));
         self.down = true;
 
         Ok(())
@@ -75,6 +78,8 @@ impl DockerComposition {
 pub struct Builder {
     checks: Vec<Box<Fn(&DockerComposition) -> bool>>,
     timeout: Duration,
+    docker: PathBuf,
+    docker_compose: PathBuf,
 }
 
 impl Builder {
@@ -111,8 +116,30 @@ impl Builder {
     ///
     /// If all service checks have not returned `true` after this much time
     /// has elapsed, `Builder::build` will return an error.
+    ///
+    /// Defaults to 1 minute.
     pub fn timeout(&mut self, timeout: Duration) -> &mut Builder {
         self.timeout = timeout;
+        self
+    }
+
+    /// Sets the name of the `docker` executable.
+    ///
+    /// Defaults to `docker`.
+    pub fn docker<P>(&mut self, path: P) -> &mut Builder
+        where P: AsRef<Path>
+    {
+        self.docker = path.as_ref().to_owned();
+        self
+    }
+
+    /// Sets the name of the `docker-compose` executable.
+    ///
+    /// Defaults to `docker-compose`.
+    pub fn docker_compose<P>(&mut self, path: P) -> &mut Builder
+        where P: AsRef<Path>
+    {
+        self.docker_compose = path.as_ref().to_owned();
         self
     }
 
@@ -124,13 +151,14 @@ impl Builder {
         where P: AsRef<Path>
     {
         let compose_file = compose_file.as_ref().to_owned();
-        try!(run(compose_command(&compose_file, &["build"])));
-        try!(run(compose_command(&compose_file, &["up", "-d"])));
+        try!(run(compose_command(&self.docker_compose, &compose_file, &["build"])));
+        try!(run(compose_command(&self.docker_compose, &compose_file, &["up", "-d"])));
 
         let log_child = try!(self.start_log_child(&compose_file));
         let ports = try!(self.get_ports(&compose_file));
 
         let composition = DockerComposition {
+            docker_compose: self.docker_compose.clone(),
             compose_file: compose_file,
             log_child: log_child,
             ports: ports,
@@ -143,7 +171,9 @@ impl Builder {
     }
 
     fn start_log_child(&self, compose_file: &Path) -> Result<Child, Box<Error>> {
-        let mut log_child = try!(compose_command(&compose_file, &["logs", "-f"])
+        let mut log_child = try!(compose_command(&self.docker_compose,
+                                                 &compose_file,
+                                                 &["logs", "-f"])
                                      .stdout(Stdio::piped())
                                      .spawn());
         let stdout = log_child.stdout.take().unwrap();
@@ -166,8 +196,10 @@ impl Builder {
     fn get_ports(&self,
                  compose_file: &Path)
                  -> Result<HashMap<String, HashMap<u16, u16>>, Box<Error>> {
-        let containers = try!(run(compose_command(&compose_file, &["ps", "-q"])));
-        let mut command = Command::new("docker");
+        let containers = try!(run(compose_command(&self.docker_compose,
+                                                  &compose_file,
+                                                  &["ps", "-q"])));
+        let mut command = Command::new(&self.docker);
         command.arg("inspect").stdin(Stdio::null());
         for container in containers.lines() {
             command.arg(container.trim());
@@ -221,8 +253,8 @@ impl Builder {
     }
 }
 
-fn compose_command(compose_file: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new("docker-compose");
+fn compose_command(compose_path: &Path, compose_file: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(compose_path);
     command.arg("-f")
            .arg(compose_file)
            .stdin(Stdio::null());
