@@ -1,4 +1,4 @@
-FROM hub.docker.palantir.build/alpine:3.1
+FROM alpine:3.1
 
 RUN apk add --update python && rm -rf /var/cache/apk/*
 
