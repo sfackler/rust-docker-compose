@@ -6,7 +6,7 @@ use std::io::Read;
 use std::net::TcpStream;
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     let docker = DockerComposition::builder()
                      .check(check_port)
