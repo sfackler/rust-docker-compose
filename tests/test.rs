@@ -1,5 +1,5 @@
-extern crate env_logger;
-extern crate docker_compose;
+use env_logger;
+
 
 use docker_compose::DockerComposition;
 use std::io::Read;

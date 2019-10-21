@@ -1,6 +1,6 @@
 //! A wrapper over Docker compositions.
-extern crate serde;
-extern crate serde_json;
+
+use serde_json;
 
 #[macro_use]
 extern crate log;
@@ -52,7 +52,7 @@ impl DockerComposition {
         self.ports.get(service).and_then(|m| m.get(&port)).cloned()
     }
 
-    fn finish_inner(&mut self) -> Result<(), Box<Error>> {
+    fn finish_inner(&mut self) -> Result<(), Box<dyn Error>> {
         if self.down {
             return Ok(());
         }
@@ -69,14 +69,14 @@ impl DockerComposition {
     ///
     /// This method is equivalent `DockerComposition`'s `Drop` implementation
     /// except that it returns any error encountered to the caller.
-    pub fn finish(mut self) -> Result<(), Box<Error>> {
+    pub fn finish(mut self) -> Result<(), Box<dyn Error>> {
         self.finish_inner()
     }
 }
 
 /// A builder to configure `DockerComposition`s.
 pub struct Builder {
-    checks: Vec<Box<Fn(&DockerComposition) -> bool>>,
+    checks: Vec<Box<dyn Fn(&DockerComposition) -> bool>>,
     timeout: Duration,
     docker: PathBuf,
     docker_compose: PathBuf,
@@ -147,7 +147,7 @@ impl Builder {
     ///
     /// This method will not return until all service checks have returned
     /// `true`.
-    pub fn build<P>(&self, compose_file: P) -> Result<DockerComposition, Box<Error>>
+    pub fn build<P>(&self, compose_file: P) -> Result<DockerComposition, Box<dyn Error>>
         where P: AsRef<Path>
     {
         let compose_file = compose_file.as_ref().to_owned();
@@ -170,7 +170,7 @@ impl Builder {
         Ok(composition)
     }
 
-    fn start_log_child(&self, compose_file: &Path) -> Result<Child, Box<Error>> {
+    fn start_log_child(&self, compose_file: &Path) -> Result<Child, Box<dyn Error>> {
         let mut log_child = compose_command(&self.docker_compose,
                                                  &compose_file,
                                                  &["logs", "-f"])
@@ -195,7 +195,7 @@ impl Builder {
 
     fn get_ports(&self,
                  compose_file: &Path)
-                 -> Result<HashMap<String, HashMap<u16, u16>>, Box<Error>> {
+                 -> Result<HashMap<String, HashMap<u16, u16>>, Box<dyn Error>> {
         let containers = run(compose_command(&self.docker_compose,
                                                   &compose_file,
                                                   &["ps", "-q"]))?;
@@ -236,7 +236,7 @@ impl Builder {
         Ok(map)
     }
 
-    fn run_checks(&self, composition: &DockerComposition) -> Result<(), Box<Error>> {
+    fn run_checks(&self, composition: &DockerComposition) -> Result<(), Box<dyn Error>> {
         let start = Instant::now();
 
         for check in &self.checks {
@@ -264,7 +264,7 @@ fn compose_command(compose_path: &Path, compose_file: &Path, args: &[&str]) -> C
     command
 }
 
-fn run(mut command: Command) -> Result<String, Box<Error>> {
+fn run(mut command: Command) -> Result<String, Box<dyn Error>> {
     let output = command.output()?;
 
     if !output.status.success() {
