@@ -57,9 +57,9 @@ impl DockerComposition {
             return Ok(());
         }
 
-        try!(self.log_child.kill());
-        try!(self.log_child.wait());
-        try!(run(compose_command(&self.docker_compose, &self.compose_file, &["down"])));
+        self.log_child.kill()?;
+        self.log_child.wait()?;
+        run(compose_command(&self.docker_compose, &self.compose_file, &["down"]))?;
         self.down = true;
 
         Ok(())
@@ -151,11 +151,11 @@ impl Builder {
         where P: AsRef<Path>
     {
         let compose_file = compose_file.as_ref().to_owned();
-        try!(run(compose_command(&self.docker_compose, &compose_file, &["build"])));
-        try!(run(compose_command(&self.docker_compose, &compose_file, &["up", "-d"])));
+        run(compose_command(&self.docker_compose, &compose_file, &["build"]))?;
+        run(compose_command(&self.docker_compose, &compose_file, &["up", "-d"]))?;
 
-        let log_child = try!(self.start_log_child(&compose_file));
-        let ports = try!(self.get_ports(&compose_file));
+        let log_child = self.start_log_child(&compose_file)?;
+        let ports = self.get_ports(&compose_file)?;
 
         let composition = DockerComposition {
             docker_compose: self.docker_compose.clone(),
@@ -165,17 +165,17 @@ impl Builder {
             down: false,
         };
 
-        try!(self.run_checks(&composition));
+        self.run_checks(&composition)?;
 
         Ok(composition)
     }
 
     fn start_log_child(&self, compose_file: &Path) -> Result<Child, Box<Error>> {
-        let mut log_child = try!(compose_command(&self.docker_compose,
+        let mut log_child = compose_command(&self.docker_compose,
                                                  &compose_file,
                                                  &["logs", "-f"])
                                      .stdout(Stdio::piped())
-                                     .spawn());
+                                     .spawn()?;
         let stdout = log_child.stdout.take().unwrap();
 
         thread::spawn(move || {
@@ -196,17 +196,17 @@ impl Builder {
     fn get_ports(&self,
                  compose_file: &Path)
                  -> Result<HashMap<String, HashMap<u16, u16>>, Box<Error>> {
-        let containers = try!(run(compose_command(&self.docker_compose,
+        let containers = run(compose_command(&self.docker_compose,
                                                   &compose_file,
-                                                  &["ps", "-q"])));
+                                                  &["ps", "-q"]))?;
         let mut command = Command::new(&self.docker);
         command.arg("inspect").stdin(Stdio::null());
         for container in containers.lines() {
             command.arg(container.trim());
         }
 
-        let inspect = try!(run(command));
-        let containers: Vec<Container> = try!(serde_json::from_str(inspect.trim()));
+        let inspect = run(command)?;
+        let containers: Vec<Container> = serde_json::from_str(inspect.trim())?;
 
         let mut map = HashMap::new();
         for container in containers {
@@ -224,8 +224,8 @@ impl Builder {
                     None => continue,
                 };
 
-                let private = try!(private.split("/").next().unwrap().parse());
-                let public = try!(host.host_port.parse());
+                let private = private.split("/").next().unwrap().parse()?;
+                let public = host.host_port.parse()?;
 
                 map.entry(service.clone())
                    .or_insert_with(|| HashMap::new())
@@ -265,7 +265,7 @@ fn compose_command(compose_path: &Path, compose_file: &Path, args: &[&str]) -> C
 }
 
 fn run(mut command: Command) -> Result<String, Box<Error>> {
-    let output = try!(command.output());
+    let output = command.output()?;
 
     if !output.status.success() {
         return Err(format!("command returned {:?}\nstdout:\n{}\nstderr\n{}",
