@@ -1,7 +1,8 @@
 [package]
 name = "docker-compose"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Steven Fackler <sfackler@palantir.com>"]
+edition = "2018"
 
 [lib]
 test = false
@@ -12,9 +13,9 @@ path = "tests/test.rs"
 harness = false
 
 [dependencies]
-log = "0.3"
-serde = "0.7"
-serde_json = "0.7"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dev-dependencies]
-env_logger = "0.3"
+env_logger = "0.7"

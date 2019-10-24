@@ -1,6 +1,6 @@
 //! A wrapper over Docker compositions.
-extern crate serde;
-extern crate serde_json;
+
+use serde_json;
 
 #[macro_use]
 extern crate log;
@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio, Child};
-use std::time::{Duration, Instant};
+use std::process::{Child, Command, Stdio};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_types::Container;
 
@@ -52,14 +52,18 @@ impl DockerComposition {
         self.ports.get(service).and_then(|m| m.get(&port)).cloned()
     }
 
-    fn finish_inner(&mut self) -> Result<(), Box<Error>> {
+    fn finish_inner(&mut self) -> Result<(), Box<dyn Error>> {
         if self.down {
             return Ok(());
         }
 
-        try!(self.log_child.kill());
-        try!(self.log_child.wait());
-        try!(run(compose_command(&self.docker_compose, &self.compose_file, &["down"])));
+        self.log_child.kill()?;
+        self.log_child.wait()?;
+        run(compose_command(
+            &self.docker_compose,
+            &self.compose_file,
+            &["down"],
+        ))?;
         self.down = true;
 
         Ok(())
@@ -69,14 +73,14 @@ impl DockerComposition {
     ///
     /// This method is equivalent `DockerComposition`'s `Drop` implementation
     /// except that it returns any error encountered to the caller.
-    pub fn finish(mut self) -> Result<(), Box<Error>> {
+    pub fn finish(mut self) -> Result<(), Box<dyn Error>> {
         self.finish_inner()
     }
 }
 
 /// A builder to configure `DockerComposition`s.
 pub struct Builder {
-    checks: Vec<Box<Fn(&DockerComposition) -> bool>>,
+    checks: Vec<Box<dyn Fn(&DockerComposition) -> bool>>,
     timeout: Duration,
     docker: PathBuf,
     docker_compose: PathBuf,
@@ -106,7 +110,8 @@ impl Builder {
     /// // We know that my_server has fully booted at this point.
     /// ```
     pub fn check<F>(&mut self, f: F) -> &mut Builder
-        where F: Fn(&DockerComposition) -> bool + 'static
+    where
+        F: Fn(&DockerComposition) -> bool + 'static,
     {
         self.checks.push(Box::new(f));
         self
@@ -127,7 +132,8 @@ impl Builder {
     ///
     /// Defaults to `docker`.
     pub fn docker<P>(&mut self, path: P) -> &mut Builder
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         self.docker = path.as_ref().to_owned();
         self
@@ -137,7 +143,8 @@ impl Builder {
     ///
     /// Defaults to `docker-compose`.
     pub fn docker_compose<P>(&mut self, path: P) -> &mut Builder
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         self.docker_compose = path.as_ref().to_owned();
         self
@@ -147,15 +154,24 @@ impl Builder {
     ///
     /// This method will not return until all service checks have returned
     /// `true`.
-    pub fn build<P>(&self, compose_file: P) -> Result<DockerComposition, Box<Error>>
-        where P: AsRef<Path>
+    pub fn build<P>(&self, compose_file: P) -> Result<DockerComposition, Box<dyn Error>>
+    where
+        P: AsRef<Path>,
     {
         let compose_file = compose_file.as_ref().to_owned();
-        try!(run(compose_command(&self.docker_compose, &compose_file, &["build"])));
-        try!(run(compose_command(&self.docker_compose, &compose_file, &["up", "-d"])));
+        run(compose_command(
+            &self.docker_compose,
+            &compose_file,
+            &["build"],
+        ))?;
+        run(compose_command(
+            &self.docker_compose,
+            &compose_file,
+            &["up", "-d"],
+        ))?;
 
-        let log_child = try!(self.start_log_child(&compose_file));
-        let ports = try!(self.get_ports(&compose_file));
+        let log_child = self.start_log_child(&compose_file)?;
+        let ports = self.get_ports(&compose_file)?;
 
         let composition = DockerComposition {
             docker_compose: self.docker_compose.clone(),
@@ -165,17 +181,15 @@ impl Builder {
             down: false,
         };
 
-        try!(self.run_checks(&composition));
+        self.run_checks(&composition)?;
 
         Ok(composition)
     }
 
-    fn start_log_child(&self, compose_file: &Path) -> Result<Child, Box<Error>> {
-        let mut log_child = try!(compose_command(&self.docker_compose,
-                                                 &compose_file,
-                                                 &["logs", "-f"])
-                                     .stdout(Stdio::piped())
-                                     .spawn());
+    fn start_log_child(&self, compose_file: &Path) -> Result<Child, Box<dyn Error>> {
+        let mut log_child = compose_command(&self.docker_compose, &compose_file, &["logs", "-f"])
+            .stdout(Stdio::piped())
+            .spawn()?;
         let stdout = log_child.stdout.take().unwrap();
 
         thread::spawn(move || {
@@ -193,28 +207,34 @@ impl Builder {
         Ok(log_child)
     }
 
-    fn get_ports(&self,
-                 compose_file: &Path)
-                 -> Result<HashMap<String, HashMap<u16, u16>>, Box<Error>> {
-        let containers = try!(run(compose_command(&self.docker_compose,
-                                                  &compose_file,
-                                                  &["ps", "-q"])));
+    fn get_ports(
+        &self,
+        compose_file: &Path,
+    ) -> Result<HashMap<String, HashMap<u16, u16>>, Box<dyn Error>> {
+        let containers = run(compose_command(
+            &self.docker_compose,
+            &compose_file,
+            &["ps", "-q"],
+        ))?;
         let mut command = Command::new(&self.docker);
         command.arg("inspect").stdin(Stdio::null());
         for container in containers.lines() {
             command.arg(container.trim());
         }
 
-        let inspect = try!(run(command));
-        let containers: Vec<Container> = try!(serde_json::from_str(inspect.trim()));
+        let inspect = run(command)?;
+        let containers: Vec<Container> = serde_json::from_str(inspect.trim())?;
 
         let mut map = HashMap::new();
         for container in containers {
             let service = match container.config.labels.get("com.docker.compose.service") {
                 Some(service) => service,
                 None => {
-                    return Err(format!("container {} missing com.docker.compose.service label",
-                                       container.id).into());
+                    return Err(format!(
+                        "container {} missing com.docker.compose.service label",
+                        container.id
+                    )
+                    .into());
                 }
             };
 
@@ -224,19 +244,19 @@ impl Builder {
                     None => continue,
                 };
 
-                let private = try!(private.split("/").next().unwrap().parse());
-                let public = try!(host.host_port.parse());
+                let private = private.split("/").next().unwrap().parse()?;
+                let public = host.host_port.parse()?;
 
                 map.entry(service.clone())
-                   .or_insert_with(|| HashMap::new())
-                   .insert(private, public);
+                    .or_insert_with(|| HashMap::new())
+                    .insert(private, public);
             }
         }
 
         Ok(map)
     }
 
-    fn run_checks(&self, composition: &DockerComposition) -> Result<(), Box<Error>> {
+    fn run_checks(&self, composition: &DockerComposition) -> Result<(), Box<dyn Error>> {
         let start = Instant::now();
 
         for check in &self.checks {
@@ -255,24 +275,24 @@ impl Builder {
 
 fn compose_command(compose_path: &Path, compose_file: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(compose_path);
-    command.arg("-f")
-           .arg(compose_file)
-           .stdin(Stdio::null());
+    command.arg("-f").arg(compose_file).stdin(Stdio::null());
     for arg in args {
         command.arg(arg);
     }
     command
 }
 
-fn run(mut command: Command) -> Result<String, Box<Error>> {
-    let output = try!(command.output());
+fn run(mut command: Command) -> Result<String, Box<dyn Error>> {
+    let output = command.output()?;
 
     if !output.status.success() {
-        return Err(format!("command returned {:?}\nstdout:\n{}\nstderr\n{}",
-                           output.status.code(),
-                           String::from_utf8_lossy(&output.stdout),
-                           String::from_utf8_lossy(&output.stderr))
-                       .into());
+        return Err(format!(
+            "command returned {:?}\nstdout:\n{}\nstderr\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
     }
 
     String::from_utf8(output.stdout).map_err(|e| e.into())

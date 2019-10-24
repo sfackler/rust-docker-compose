@@ -1,17 +1,19 @@
-extern crate env_logger;
-extern crate docker_compose;
+use env_logger;
 
 use docker_compose::DockerComposition;
 use std::io::Read;
 use std::net::TcpStream;
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     let docker = DockerComposition::builder()
-                     .check(check_port)
-                     .build(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/docker-compose.yml"))
-                     .unwrap();
+        .check(check_port)
+        .build(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/docker-compose.yml"
+        ))
+        .unwrap();
     let port = docker.port("test", 1234).unwrap();
     let mut stream = TcpStream::connect(("localhost", port)).unwrap();
     let mut out = String::new();
